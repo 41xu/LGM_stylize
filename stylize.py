@@ -94,6 +94,13 @@ def config_optimizers(opt):
     return optimizer
 
 
+def setup_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+
 # process function
 def process(opt: Options, path):
     name = os.path.splitext(os.path.basename(path))[0]
@@ -141,19 +148,18 @@ def process(opt: Options, path):
     # TODO: here optimizer should use the origina LGM optimizer
     # optimizer = torch.optim.AdamW(model.parameters(), lr=opt.lr, weight_decay=0.05, betas=(0.9, 0.95))
     optimizer = torch.optim.AdamW([gaussians], lr=opt.lr, weight_decay=0.05, betas=(0.9, 0.95))
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=opt.lr, total_steps=opt.edit_train_steps, pct_start=0.3)
+    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=opt.lr, total_steps=opt.edit_train_steps, pct_start=0.3)
 
     # stylize
     # in face case, there have 65 views for training, 48 views for stylize
     # in this 360 case, initialize 60 views for training and 48 views for stylize
 
-    azimuth = np.arange(0, 360, 360//opt.train_cam_num, dtype=np.int32)
-    random.seed(0)
+    total_views = np.arange(0, 360, 360//opt.train_cam_num, dtype=np.int32)
     view_index = random.sample(range(0, opt.train_cam_num), min(opt.train_cam_num, opt.edit_cam_num))
-    edit_azimuth = [azimuth[i] for i in view_index]
+    edit_views = [total_views[i] for i in view_index]
     images = []
     # render some images for train and editing
-    for azi in tqdm.tqdm(azimuth):
+    for azi in tqdm.tqdm(total_views):
         cam_poses = torch.from_numpy(orbit_camera(0, azi, radius=opt.cam_radius, opengl=True)).unsqueeze(0).to(device)
         cam_poses[:, :3, 1:3] *= -1
         cam_view = torch.inverse(cam_poses).transpose(1, 2)
@@ -161,7 +167,7 @@ def process(opt: Options, path):
         cam_pos = - cam_poses[:, :3, 3]
         image = model.gs.render(gaussians, cam_view.unsqueeze(0), cam_view_proj.unsqueeze(0), cam_pos.unsqueeze(0), scale_modifier=1)['image']
         images.append(image)
-    train_images = [images[i] for i in view_index] # original images
+    train_images = [images[i] for i in view_index] # use for editing
     edit_images = {}
 
     prompt_utils = StableDiffusionPromptProcessor({
@@ -173,20 +179,20 @@ def process(opt: Options, path):
 
     # edit
     ip2p = InstructPix2PixGuidance(OmegaConf.create({"min_step_percent": 0.02, "max_step_percent": 0.98}))
-    view_index_stack = list(range(len(edit_azimuth)))
+    view_index_stack = list(range(len(edit_views)))
     elevation = 0
 
     for step in tqdm.tqdm(range(opt.edit_train_steps)):
         # model.train()
         optimizer.zero_grad()
-        # with torch.autocast(device_type='cuda', dtype=torch.float16):
-        #     gaussians = model.forward_gaussians(input_image) # TODO: 这里的gaussian肯定不是这样的到的。。。
+
         if not view_index_stack:
-            view_index_stack = list(range(len(edit_azimuth)))
+            view_index_stack = list(range(len(edit_views)))
+        
         view_index = random.choice(view_index_stack)
         view_index_stack.remove(view_index)
         
-        cam_pos = torch.from_numpy(orbit_camera(elevation, edit_azimuth[view_index], radius=opt.cam_radius, opengl=True)).unsqueeze(0).to(device)
+        cam_pos = torch.from_numpy(orbit_camera(elevation, edit_views[view_index], radius=opt.cam_radius, opengl=True)).unsqueeze(0).to(device)
         cam_pos[:, :3, 1:3] *= -1
         cam_view = torch.inverse(cam_pos).transpose(1, 2)
         cam_view_proj = cam_view @ proj_matrix
@@ -194,28 +200,34 @@ def process(opt: Options, path):
 
         render_image = model.gs.render(gaussians, cam_view.unsqueeze(0), cam_view_proj.unsqueeze(0), cam_pos.unsqueeze(0), scale_modifier=1)['image']
         # render_image shape and train_image shape: [1,1,3,512,512]
+        render_image_reshape = render_image.squeeze(0).permute(0, 2, 3, 1)
+
         # loss calculate
-        # LGM 似乎不用更新gaussian的learning rate，直接用UNet学出来的，所以这里暂时不用update gaussians learning rate?
         if view_index not in edit_images or (opt.per_editing_steps > 0 and opt.edit_begin_step < step < opt.edit_util_step and step % opt.per_editing_steps == 0):
-            render_image_reshape = render_image.squeeze(0).permute(0, 2, 3, 1)
             train_img = train_images[view_index].squeeze(0).permute(0, 2, 3, 1) # 1,H,W,C
             result = ip2p(render_image_reshape, train_img, prompt_utils)
             # render_image shape should be 1,512,512,3
             edit_images[view_index] = result["edit_images"].detach().clone() # 1,H,W,C
-            tmp = edit_images[view_index].squeeze(0) * 255
-            tmp = tmp.clamp(0, 255).cpu().numpy().astype(np.uint8)
-            tmp2 = render_image_reshape.squeeze(0) * 255
-            tmp2 = tmp2.clamp(0, 255).cpu().detach().numpy().astype(np.uint8)
-            image = Image.fromarray(tmp.numpy()).save(f'{opt.workspace}/{name}_{step}.png')
+            # tmp = edit_images[view_index].squeeze(0) * 255
+            # tmp = tmp.clamp(0, 255).cpu().numpy().astype(np.uint8)
+            # # tmp2 = render_image_reshape.squeeze(0) * 255
+            # # tmp2 = tmp2.clamp(0, 255).cpu().detach().numpy().astype(np.uint8)
+            # image = Image.fromarray(tmp).save(f'{opt.workspace}/{name}_{step}.png')
 
-            
+        # print(edit_images.keys(), len(edit_images.keys()))
         gt_image = edit_images[view_index] 
+        
 
         loss = opt.edit_lambda_l1 * torch.nn.functional.l1_loss(render_image_reshape, gt_image) + \
                 opt.edit_lambda_p * perceptual_loss(render_image_reshape.permute(0, 3, 1, 2).contiguous(), gt_image.permute(0, 3, 1, 2).contiguous()) # perceptual input should be 1,C,H,W
          # TODO: loss add model loss
+        
+        # mse loss for rendering
+        loss += F.mse_loss(render_image.squeeze(0).permute(0, 2, 3, 1), gt_image)
+        
+        loss.backward()
         optimizer.step()
-        scheduler.step()
+        # scheduler.step()
 
         print(f"[INFO] loss: {loss.detach().item():.6f}")
 
@@ -253,6 +265,7 @@ if os.path.isdir(opt.test_path):
 else:
     file_paths = [opt.test_path]
 for path in file_paths:
+    setup_seed(0)
     process(opt, path)
 
 """

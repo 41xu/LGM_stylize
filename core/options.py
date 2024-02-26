@@ -73,7 +73,7 @@ class Options:
 
     # for stylize setting
     train_cam_num: int = 60
-    edit_cam_num: int = 50
+    edit_cam_num: int = 48
     # for stylize optimizer setting, something maybe not useful
     edit_train_steps: int = 1500 # set 200 for testing, acutally should be 1500
     gs_lr_scaler: float = 3.0
@@ -83,7 +83,7 @@ class Options:
     scaling_lr_scaler: float = 2.0
     rotation_lr_scaler: float = 2.0
     # for editing process setting
-    per_editing_steps: int = 1 # 10 default
+    per_editing_steps: int = 5 # 10 default
     # 目前来看per editing, editing stage没用，因为直接editing...
     edit_begin_step: int = 0
     edit_util_step: int = 1500 # for testing, actually should be 1000

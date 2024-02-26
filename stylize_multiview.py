@@ -170,6 +170,8 @@ def process(opt: Options, path):
         optimizer.step()
         print(f"[INFO] loss: {loss.detach().item():.6f}")
 
+
+
         if step % 100 == 0: # log
             # fix front view for logging
             vi = 15
