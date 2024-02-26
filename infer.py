@@ -45,6 +45,7 @@ model = model.half().to(device)
 model.eval()
 
 rays_embeddings = model.prepare_default_rays(device)
+# print("ray_embeddings.shape:", rays_embeddings.shape)
 
 tan_half_fov = np.tan(0.5 * np.deg2rad(opt.fovy))
 proj_matrix = torch.zeros(4, 4, dtype=torch.float32, device=device)
@@ -65,6 +66,8 @@ pipe = pipe.to(device)
 
 # load rembg
 bg_remover = rembg.new_session()
+negative_prompt = 'ugly, blurry, pixelated obscure, unnatural colors, poor lighting, dull, unclear, cropped, lowres, low quality, artifacts, duplicate'
+
 
 # process function
 def process(opt: Options, path):
@@ -87,8 +90,8 @@ def process(opt: Options, path):
     # rgba to rgb white bg
     if image.shape[-1] == 4:
         image = image[..., :3] * image[..., 3:4] + (1 - image[..., 3:4])
-
-    mv_image = pipe('', image, guidance_scale=5.0, num_inference_steps=30, elevation=0)
+    # TODO: here use more mv, num_frames=20 maybe
+    mv_image = pipe('', image, negative_prompt=negative_prompt, guidance_scale=5.0, num_inference_steps=30, elevation=0)
     mv_image = np.stack([mv_image[1], mv_image[2], mv_image[3], mv_image[0]], axis=0) # [4, 256, 256, 3], float32
 
     # generate gaussians

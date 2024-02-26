@@ -1,0 +1,13 @@
+.threestudio_cache
+__pycache__
+
+pretrained
+
+# log dir
+fix_front
+fix_multi
+ip2p_test
+stylize_result
+workspace_test
+
+*.mp4

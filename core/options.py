@@ -70,7 +70,30 @@ class Options:
     force_cuda_rast: bool = False
     # render fancy video with gaussian scaling effect
     fancy_video: bool = False
-    
+
+    # for stylize setting
+    train_cam_num: int = 60
+    edit_cam_num: int = 50
+    # for stylize optimizer setting, something maybe not useful
+    edit_train_steps: int = 1500 # set 200 for testing, acutally should be 1500
+    gs_lr_scaler: float = 3.0
+    gs_lr_end_scaler: float = 2.0
+    color_lr_scaler: float = 3.0
+    opacity_lr_scaler: float = 2.0
+    scaling_lr_scaler: float = 2.0
+    rotation_lr_scaler: float = 2.0
+    # for editing process setting
+    per_editing_steps: int = 1 # 10 default
+    # 目前来看per editing, editing stage没用，因为直接editing...
+    edit_begin_step: int = 0
+    edit_util_step: int = 1500 # for testing, actually should be 1000
+    text_prompt: str = 'Make it steampunk style' # 'make it to the cartoon style'
+    # for stylize optimizer
+    edit_lambda_l1: float = 100 # 10-》100 效果好一点
+    edit_lambda_p: float = 100
+    seed: int = 0
+
+
 
 # all the default settings
 config_defaults: Dict[str, Options] = {}
