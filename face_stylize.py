@@ -1,3 +1,5 @@
+# load face.ply, then stylize. Compare with GaussianEditor
+
 
 import os
 import tyro

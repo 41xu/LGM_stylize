@@ -72,8 +72,8 @@ class Options:
     fancy_video: bool = False
 
     # for stylize setting
-    train_cam_num: int = 60
-    edit_cam_num: int = 48
+    train_cam_num: int = 60 # 80
+    edit_cam_num: int = 48 # 60
     # for stylize optimizer setting, something maybe not useful
     edit_train_steps: int = 1500 # set 200 for testing, acutally should be 1500
     gs_lr_scaler: float = 3.0
