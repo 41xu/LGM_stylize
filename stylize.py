@@ -137,9 +137,14 @@ def process(opt: Options, path):
 
     with torch.autocast(device_type='cuda', dtype=torch.float16):
         gaussians = model.forward_gaussians(input_image) # tensor, no gradient
-    
-    gaussians = gaussians.detach().clone().requires_grad_(True)
 
+    gaussians = gaussians.detach().clone().requires_grad_(True) # [:3]: position, fix
+
+    l = [
+        {'params': gaussians[...,:3].detach().clone().requires_grad_(False), 'lr': opt.lr},
+        {'params': gaussians[...,3:].detach().clone().requires_grad_(True), 'lr': opt.lr},
+        ]
+    
     model.gs.save_ply(gaussians, os.path.join(opt.workspace, name + '.ply'))
 
     perceptual_loss = PerceptualLoss().eval().to(device)
@@ -147,7 +152,8 @@ def process(opt: Options, path):
     # optimizer = config_optimizers(opt)
     # TODO: here optimizer should use the origina LGM optimizer
     # optimizer = torch.optim.AdamW(model.parameters(), lr=opt.lr, weight_decay=0.05, betas=(0.9, 0.95))
-    optimizer = torch.optim.AdamW([gaussians], lr=opt.lr, weight_decay=0.05, betas=(0.9, 0.95))
+    optimizer = torch.optim.AdamW(l, lr=opt.lr, weight_decay=0.05, betas=(0.9, 0.95))
+    # optimizer = torch.optim.AdamW([gaussians], lr=opt.lr, weight_decay=0.05, betas=(0.9, 0.95))
     # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=opt.lr, total_steps=opt.edit_train_steps, pct_start=0.3)
 
     # stylize
@@ -218,6 +224,7 @@ def process(opt: Options, path):
         gt_image = edit_images[view_index] 
         
 
+
         loss = opt.edit_lambda_l1 * torch.nn.functional.l1_loss(render_image_reshape, gt_image) + \
                 opt.edit_lambda_p * perceptual_loss(render_image_reshape.permute(0, 3, 1, 2).contiguous(), gt_image.permute(0, 3, 1, 2).contiguous()) # perceptual input should be 1,C,H,W
          # TODO: loss add model loss
@@ -226,6 +233,10 @@ def process(opt: Options, path):
         loss += F.mse_loss(render_image.squeeze(0).permute(0, 2, 3, 1), gt_image)
         
         loss.backward()
+        # l[-1]['params'].require_grad = False
+        # with torch.no_grad():
+        #     gaussians.grad[..., :3] = 0
+        #     # grad clipping      
         optimizer.step()
         # scheduler.step()
 
@@ -265,7 +276,7 @@ if os.path.isdir(opt.test_path):
 else:
     file_paths = [opt.test_path]
 for path in file_paths:
-    setup_seed(0)
+    setup_seed(20240226)
     process(opt, path)
 
 """
