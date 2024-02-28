@@ -1,5 +1,7 @@
 import numpy as np
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -96,6 +98,61 @@ class GaussianRenderer:
             "image": images, # [B, V, 3, H, W]
             "alpha": alphas, # [B, V, 1, H, W]
         }
+
+    def render_face(self, gaussians, cam, bg_color=None, scale_modifier=1.0):
+        # cam type: Cam
+        # default B, V in render() is 1, 1, which means we just input one batch, one view camera.
+        # therefore in this function, we cancle the loop of B, V
+
+        means3D = gaussians[0, :, 0:3].contiguous().float()
+        opacity = gaussians[0, :, 3:4].contiguous().float()
+        scales = gaussians[0, :, 4:7].contiguous().float()
+        rotations = gaussians[0, :, 7:11].contiguous().float()
+        rgbs = gaussians[0, :, 11:].contiguous().float() # [N, 3]
+
+        raster_settings = GaussianRasterizationSettings(
+            image_height=cam.image_height,
+            image_width=cam.image_width,
+            tanfovx=math.tan(cam.FoVx * 0.5),
+            tanfovy=math.tan(cam.FoVy * 0.5),
+            bg=self.bg_color if bg_color is None else bg_color,
+            scale_modifier=scale_modifier,
+            viewmatrix=cam.world_view_transform,
+            projmatrix=cam.full_proj_transform,
+            sh_degree=0,
+            campos=cam.camera_center,
+            prefiltered=False,
+            debug=False,
+        )
+        rasterizer = GaussianRasterizer(raster_settings=raster_settings)
+        rendered_image, radii, rendered_depth, rendered_alpha = rasterizer(
+            means3D=means3D,
+            means2D=torch.zeros_like(means3D, dtype=torch.float32, device=gaussians.device),
+            shs=None,
+            colors_precomp=rgbs,
+            opacities=opacity,
+            scales=scales,
+            rotations=rotations,
+            cov3D_precomp=None,
+        )
+
+        rendered_image = rendered_image.clamp(0, 1)
+
+        return {
+            "image": rendered_image, # 3, H, W
+            "alpha": rendered_alpha, # 1, H, W
+        }
+
+        # images.append(rendered_image)
+        # alphas.append(rendered_alpha)
+
+        # images = torch.stack(images, dim=0).view(1, 1, 3, self.opt.output_size, self.opt.output_size)
+        # alphas = torch.stack(alphas, dim=0).view(1, 1, 1, self.opt.output_size, self.opt.output_size)
+
+        # return {
+        #     "image": images, # [1, 1, 3, H, W]
+        #     "alpha": alphas, # [1, 1, 1, H, W]
+        # }
 
 
     def save_ply(self, gaussians, path, compatible=True):

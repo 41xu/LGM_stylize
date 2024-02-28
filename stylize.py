@@ -153,6 +153,7 @@ def process(opt: Options, path):
     # TODO: here optimizer should use the origina LGM optimizer
     # optimizer = torch.optim.AdamW(l, lr=opt.lr, weight_decay=0.05, betas=(0.9, 0.95))
     optimizer = torch.optim.AdamW([gaussians], lr=opt.lr, weight_decay=0.05, betas=(0.9, 0.95))
+    # optimizer = torch.optim.Adam([gaussians], lr=0.0, eps=1e-15)
     # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=opt.lr, total_steps=opt.edit_train_steps, pct_start=0.3)
 
     # stylize
@@ -221,7 +222,6 @@ def process(opt: Options, path):
 
         # print(edit_images.keys(), len(edit_images.keys()))
         gt_image = edit_images[view_index] 
-        
 
 
         loss = opt.edit_lambda_l1 * torch.nn.functional.l1_loss(render_image_reshape, gt_image) + \
@@ -230,11 +230,28 @@ def process(opt: Options, path):
         
         # mse loss for rendering
         loss += F.mse_loss(render_image.squeeze(0).permute(0, 2, 3, 1), gt_image)
+
+        if step % 100 == 0: # log
+            # fix front view for logging
+            vi = 15
+            cam_poses_vi = torch.from_numpy(orbit_camera(elevation, edit_views[vi], radius=opt.cam_radius, opengl=True)).unsqueeze(0).to(device)
+            cam_poses_vi[:, :3, 1:3] *= -1
+            cam_view_vi = torch.inverse(cam_poses_vi).transpose(1, 2)
+            cam_view_proj_vi = cam_view_vi @ proj_matrix
+            cam_pos_vi = - cam_poses_vi[:, :3, 3]
+            train_image_vi = train_images[vi].squeeze(0).permute(0, 2, 3, 1)
+            render_image_vi = model.gs.render(gaussians, cam_view_vi.unsqueeze(0), cam_view_proj_vi.unsqueeze(0), cam_pos_vi.unsqueeze(0), scale_modifier=1)['image'].squeeze(0).permute(0, 2, 3, 1)
+            gt_image_vi = ip2p(render_image_vi, train_image_vi, prompt_utils)["edit_images"].detach().clone().squeeze(0) * 255
+            gt_image_vi = gt_image_vi.clamp(0, 255).cpu().numpy().astype(np.uint8)
+            render_image_vi = render_image_vi.squeeze(0) * 255
+            render_image_vi = render_image_vi.clamp(0, 255).cpu().detach().numpy().astype(np.uint8)
+            Image.fromarray(np.concatenate((gt_image_vi, render_image_vi), axis=1)).save(f'{opt.workspace}/{name}_{step}.png')
+
         
         loss.backward()
         # l[-1]['params'].require_grad = False
         with torch.no_grad():
-            gaussians.grad[..., :11] = 0
+            gaussians.grad[..., 3:4] = 0
             # grad clipping      
         optimizer.step()
         # scheduler.step()

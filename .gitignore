@@ -1,13 +1,22 @@
 .threestudio_cache
 __pycache__
 
-pretrained
+pretrained/
 
 # log dir
-fix_front
-fix_multi
-ip2p_test
-stylize_result
-workspace_test
+fix_front/
+fix_multi/
+ip2p_test/
+stylize_result/
+workspace_test/
 
 *.mp4
+
+8views/
+cat/
+face/
+humans/
+ip2p_test/
+noise_save/
+workspace/
+
