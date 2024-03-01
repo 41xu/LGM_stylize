@@ -14,35 +14,6 @@ from threestudio.utils.base import BaseObject
 from threestudio.utils.misc import C, parse_version
 from threestudio.utils.typing import *
 
-from PIL import Image
-
-class InstructPix2PixInference:
-    def __init__(self, device="cuda") -> None:
-        ip2p_name_or_path = "timbrooks/instruct-pix2pix"
-        ddim_scheduler_name_or_path = "CompVis/stable-diffusion-v1-4"
-
-        self.device = device
-
-        print("Loading InstructPix2Pix ...")
-        self.weights_dtype = torch.float16
-        pipe_kwargs = {
-            "safety_checker": None,
-            "feature_extractor": None,
-            "requires_safety_checker": False,
-            "torch_dtype": self.weights_dtype,
-            "cache_dir": None,
-        }
-        self.pipe = StableDiffusionInstructPix2PixPipeline.from_pretrained(ip2p_name_or_path, pipe_kwargs).to(self.device)
-    
-    def forward(self, image, prompt):
-        edited = self.pipe(
-            prompt, 
-            image=image, 
-            num_inference_steps=20,
-            image_guidance_scale=1.5,
-            guidance_scale=7.5,
-            ).image[0]
-
 
 @threestudio.register("stable-diffusion-instructpix2pix-guidance")
 class InstructPix2PixGuidance(BaseObject):
@@ -196,8 +167,6 @@ class InstructPix2PixGuidance(BaseObject):
         self,
         text_embeddings: Float[Tensor, "BB 77 768"],
         latents: Float[Tensor, "B 4 DH DW"],
-        # view: Int[Tensor, "B"],
-        # generator: torch.Generator,
         image_cond_latents: Float[Tensor, "B 4 DH DW"],
         t: Int[Tensor, "B"],
     ) -> Float[Tensor, "B 4 DH DW"]:
@@ -205,13 +174,7 @@ class InstructPix2PixGuidance(BaseObject):
         self.scheduler.set_timesteps(self.cfg.diffusion_steps)
         with torch.no_grad():
             # add noise
-            # noise = torch.randn_like(latents)
-            size_ = latents.size()
-            # noise = torch.randn(size_, generator=generator, device=latents.device)
-            noise = torch.randn(size_, device=latents.device)
-            # tmp = np.array(noise.detach().clone().cpu().squeeze()) * 255
-            # Image.fromarray(tmp.transpose(1,2,0).astype(np.uint8)).save(f'{view}.png')
-            
+            noise = torch.randn_like(latents)
             latents = self.scheduler.add_noise(latents, noise, t)  # type: ignore
             threestudio.debug("Start editing...")
             # sections of code used from https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_instruct_pix2pix.py
@@ -280,8 +243,6 @@ class InstructPix2PixGuidance(BaseObject):
         rgb: Float[Tensor, "B H W C"],
         cond_rgb: Float[Tensor, "B H W C"],
         prompt_utils: PromptProcessorOutput,
-        # view: Int[Tensor, "B"],
-        # generator: torch.Generator,
         **kwargs,
     ):
         batch_size, H, W, _ = rgb.shape
@@ -319,7 +280,6 @@ class InstructPix2PixGuidance(BaseObject):
             [batch_size],
             dtype=torch.long,
             device=self.device,
-            # generator=generator,
         )
 
         if self.cfg.use_sds:
@@ -336,7 +296,6 @@ class InstructPix2PixGuidance(BaseObject):
                 "max_step": self.max_step,
             }
         else:
-            # edit_latents = self.edit_latents(text_embeddings, latents, generator, cond_latents, t)
             edit_latents = self.edit_latents(text_embeddings, latents, cond_latents, t)
             edit_images = self.decode_latents(edit_latents)
             edit_images = F.interpolate(edit_images, (H, W), mode="bilinear")

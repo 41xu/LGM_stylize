@@ -124,6 +124,14 @@ def process(opt: Options, prompt, prompt_neg='', input_num_steps=30, guidance_sc
     gaussians = gaussians.detach().clone().requires_grad_(True) # [:3]: position, fix
     
     model.gs.save_ply(gaussians, os.path.join(opt.workspace, prompt.replace(' ', '_') + '.ply'))
+    ip2p = InstructPix2PixGuidance(OmegaConf.create({"min_step_percent": 0.02, "max_step_percent": 0.98}))
+
+    prompt_utils = StableDiffusionPromptProcessor({
+        'pretrained_model_name_or_path': 'runwayml/stable-diffusion-v1-5',
+        'prompt': "Turn it to a clown",
+        # 'use_cache': False,
+        'spawn': False,
+    })()
 
     total_views = np.arange(0, 360, 360//opt.train_cam_num, dtype=np.int32)
     for view in total_views:
@@ -133,9 +141,14 @@ def process(opt: Options, prompt, prompt_neg='', input_num_steps=30, guidance_sc
         cam_view_proj = cam_view @ proj_matrix
         cam_pos = - cam_poses[:, :3, 3]
         image = model.gs.render(gaussians, cam_view.unsqueeze(0), cam_view_proj.unsqueeze(0), cam_pos.unsqueeze(0), scale_modifier=1)['image']
+        edited = ip2p(image.squeeze(0).permute(0, 2, 3, 1), image.squeeze(0).permute(0, 2, 3, 1), prompt_utils)['edit_images'].detach().clone()
+        # edited: 1,H,W,C
+        print(edited.shape)
         image = image.detach().squeeze(0).permute(0, 2, 3, 1).squeeze(0) * 255
+        # image: 1,H,W,C
         image = image.clamp(0, 255).cpu().numpy().astype(np.uint8)
         Image.fromarray(image).save(f'{opt.workspace}/frame_{view:03d}.png')
+        Image.fromarray(edited.clamp(0, 255).cpu().numpy().astype(np.uint8)).save(f'{opt.workspace}/frame_{view:03d}_edited.png')
 
     images = []
     # generate original video
@@ -162,3 +175,4 @@ def process(opt: Options, prompt, prompt_neg='', input_num_steps=30, guidance_sc
 
 
 process(opt, prompt="Albert Einstein", prompt_neg=negative_prompt, seed=202402)
+
