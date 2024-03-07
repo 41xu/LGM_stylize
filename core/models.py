@@ -10,6 +10,8 @@ from core.unet import UNet
 from core.options import Options
 from core.gs import GaussianRenderer
 
+from plyfile import PlyData
+
 
 class LGM(nn.Module):
     def __init__(
@@ -172,3 +174,79 @@ class LGM(nn.Module):
             results['psnr'] = psnr
 
         return results
+    
+class GaussianModel:
+
+    def __init__(self):
+        self._xyz = torch.empty(0)
+        self._rgbs = torch.empty(0)
+        self._scaling = torch.empty(0)
+        self._rotation = torch.empty(0)
+        self._opacity = torch.empty(0)
+        self.max_radii2D = torch.empty(0)
+        self.xyz_gradient_accum = torch.empty(0)
+        self.denom = torch.empty(0)
+        self.optimizer = None
+        self.percent_dense = 0
+        self.spatial_lr_scale = 0
+
+    def load(self, gaussians): # gaussians: Tensor, B,N,14
+        """
+        self.xyz = gaussians[..., :3].detach().clone().to(device).requires_grad_(True)
+        self.opacity = gaussians[..., 3:4].detach().clone().to(device).requires_grad_(True)
+        self.scale = gaussians[..., 4:7].detach().clone().to(device).requires_grad_(True)
+        self.rotation = gaussians[..., 7:11].detach().clone().to(device).requires_grad_(True)
+        self.rgb = gaussians[..., 11:].detach().clone().to(device).requires_grad_(True)
+    
+        
+        
+        """
+        xyz = gaussians[..., :3].to("cuda")
+        opacities = gaussians[..., 3:4].to("cuda")
+        scales = gaussians[..., 4:7].to("cuda")
+        rots = gaussians[..., 7:11].to("cuda")
+        rgbs = gaussians[..., 11:].to("cuda")
+
+        self._xyz = nn.Parameter(xyz, requires_grad=True)
+        self._rgbs = nn.Parameter(rgbs, requires_grad=True)
+        self._opacity = nn.Parameter(opacities, requires_grad=True)
+        self._scaling = nn.Parameter(scales, requires_grad=True)
+        self._rotation = nn.Parameter(rots, requires_grad=True)
+
+    def traininig_setup(self, opt):
+        l = [
+                {
+                    "params": [self._xyz],
+                    "lr": opt.position_lr,
+                    # "lr": opt.position_lr_init * opt.spatial_lr_scale,
+                    "name": "xyz",
+                },
+                {
+                    "params": [self._opacity],
+                    "lr": opt.opacity_lr,
+                    "name": "opacity",
+                },
+                {
+                    "params": [self._scaling],
+                    "lr": opt.scaling_lr,
+                    "name": "scaling",
+                },
+                {
+                    "params": [self._rotation],
+                    "lr": opt.rotation_lr,
+                    "name": "rotation",
+                },
+                {
+                    "params": [self._rgbs],
+                    "lr": opt.color_lr,
+                    "name": "feature",
+                }
+            ]
+        for x in l:
+            print(x["lr"])
+        # self.optimizer = torch.optim.Adam(l, lr=opt.lr, eps=1e-15)
+        self.optimizer = torch.optim.AdamW(l, weight_decay=0.05, betas=(0.9, 0.95))
+        # self.xyz_scheduler_args? 
+    def save_gaussians(self):
+        return torch.cat([self._xyz, self._opacity, self._scaling, self._rotation, self._rgbs], dim=-1)
+

@@ -20,7 +20,7 @@ from kiui.op import recenter
 from kiui.cam import orbit_camera
 
 from core.options import AllConfigs, Options
-from core.models import LGM
+from core.models import LGM, GaussianModel
 from mvdream.pipeline_mvdream import MVDreamPipeline
 from argparse import ArgumentParser
 from stylize_utils import OptimizationParams
@@ -283,51 +283,15 @@ def process(opt: Options, path):
 
     # model.train()
 
+    Gaussian = GaussianModel()
+
     with torch.autocast(device_type='cuda', dtype=torch.float16):
         gaussians = model.forward_gaussians(input_image) # tensor, no gradient
 
-    # gaussians = gaussians.detach().clone().requires_grad_(True) # [:3]: position, fix
-    Gaussian = Gaussians(gaussians, device)
-    Gaussian.training_setup(opt)
+    Gaussian.load(gaussians)
+    Gaussian.traininig_setup(opt)
 
-    # TODO 这里的gaussian 优化要改成和GaussianEditor一样的？
-
-    # l = [
-    #     {
-    #         "params": [gaussians[..., :3]],
-    #         "lr": opt.position_lr_init * opt.spatial_lr_scale,
-    #         "name": "xyz",
-    #     },
-    #     {
-    #         "params": [gaussians[..., 3:4]],
-    #         "lr": opt.opacity_lr,
-    #         "name": "opacity",
-    #     },
-    #     {
-    #         "params": [gaussians[..., 4:7]],
-    #         "lr": opt.scaling_lr,
-    #         "name": "scaling",
-    #     },
-    #     {
-    #         "params": [gaussians[..., 7:11]],
-    #         "lr": opt.rotation_lr,
-    #         "name": "rotation",
-    #     },
-    #     {
-    #         "params": [gaussians[..., 11:]],
-    #         "lr": opt.color_lr,
-    #         "name": "feature",
-    #     }
-    # ]
-
-    # # optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
-    # lr = {
-    #     "xyz": opt.position_lr_init * opt.spatial_lr_scale,
-    #     "opacity": opt.opacity_lr,
-    #     "scaling": opt.scaling_lr,
-    #     "rotation": opt.rotation_lr,
-    #     "feature": opt.color_lr,
-    # }
+    print(f"gaussians.shape: {gaussians.shape}, Gaussian.save_gaussians.shape: {Gaussian.save_gaussians().shape}")
     
     model.gs.save_ply(gaussians, os.path.join(opt.workspace, name + '.ply'))
 
@@ -349,7 +313,7 @@ def process(opt: Options, path):
         cam_view = torch.inverse(cam_poses).transpose(1, 2)
         cam_view_proj = cam_view @ proj_matrix
         cam_pos = - cam_poses[:, :3, 3]
-        image = model.gs.render(Gaussian.capture(), cam_view.unsqueeze(0), cam_view_proj.unsqueeze(0), cam_pos.unsqueeze(0), scale_modifier=1)['image']
+        image = model.gs.render(Gaussian.save_gaussians(), cam_view.unsqueeze(0), cam_view_proj.unsqueeze(0), cam_pos.unsqueeze(0), scale_modifier=1)['image']
         images.append(image)
     train_images = [images[i] for i in view_index] # use for editing
     edit_images = {}
@@ -380,7 +344,7 @@ def process(opt: Options, path):
         cam_view_proj = cam_view @ proj_matrix
         cam_pos = - cam_pos[:, :3, 3]
 
-        render_image = model.gs.render(Gaussian.capture(), cam_view.unsqueeze(0), cam_view_proj.unsqueeze(0), cam_pos.unsqueeze(0), scale_modifier=1)['image']
+        render_image = model.gs.render(Gaussian.save_gaussians(), cam_view.unsqueeze(0), cam_view_proj.unsqueeze(0), cam_pos.unsqueeze(0), scale_modifier=1)['image']
         # render_image shape and train_image shape: [1,1,3,512,512]
         render_image_reshape = render_image.squeeze(0).permute(0, 2, 3, 1)
 
@@ -410,22 +374,6 @@ def process(opt: Options, path):
         loss += reconstruct
         loss.backward()
 
-        # gaussians = torch.cat([pos, opacity, scale, rotation, rgbs], dim=-1) # [B, N, 14]
-        # TODO: update params
-        # grad_xyz = gaussians.grad[..., :3]
-        # grad_opacity = gaussians.grad[..., 3:4]
-        # grad_scale = gaussians.grad[..., 4:7]
-        # grad_rotation = gaussians.grad[..., 7:11]
-        # grad_rgb = gaussians.grad[..., 11:]
-
-        # gaussians.data[..., :3] -= lr["xyz"] * grad_xyz
-        # gaussians.data[..., 3:4] -= lr["opacity"] * grad_opacity
-        # gaussians.data[..., 4:7] -= lr["scaling"] * grad_scale
-        # gaussians.data[..., 7:11] -= lr["rotation"] * grad_rotation
-        # gaussians.data[..., 11:] -= lr["feature"] * grad_rgb
-
-        # gaussians.grad.zero_()
-
         Gaussian.optimizer.step()
         Gaussian.optimizer.zero_grad()
         # densify_and_prune(step)
@@ -436,7 +384,7 @@ def process(opt: Options, path):
         print(f"[INFO] loss: {loss.detach().item():.6f}")
 
         with torch.no_grad():
-            if step % 10 == 0: # log
+            if step % 1 == 0: # log
                 # fix front view for logging
                 vi = 0
                 cam_poses_vi = torch.from_numpy(orbit_camera(elevation, total_views[vi], radius=opt.cam_radius, opengl=True)).unsqueeze(0).to(device)
@@ -445,7 +393,7 @@ def process(opt: Options, path):
                 cam_view_proj_vi = cam_view_vi @ proj_matrix
                 cam_pos_vi = - cam_poses_vi[:, :3, 3]
                 train_image_vi = images[vi].squeeze(0).permute(0, 2, 3, 1)
-                render_image_vi = model.gs.render(Gaussian.capture(), cam_view_vi.unsqueeze(0), cam_view_proj_vi.unsqueeze(0), cam_pos_vi.unsqueeze(0), scale_modifier=1)['image'].squeeze(0).permute(0, 2, 3, 1)
+                render_image_vi = model.gs.render(Gaussian.save_gaussians(), cam_view_vi.unsqueeze(0), cam_view_proj_vi.unsqueeze(0), cam_pos_vi.unsqueeze(0), scale_modifier=1)['image'].squeeze(0).permute(0, 2, 3, 1)
                 gt_image_vi = ip2p(render_image_vi, train_image_vi, prompt_utils)["edit_images"].detach().clone().squeeze(0) * 255
                 gt_image_vi = gt_image_vi.clamp(0, 255).cpu().numpy().astype(np.uint8)
                 render_image_vi = render_image_vi.squeeze(0) * 255
@@ -473,7 +421,7 @@ def process(opt: Options, path):
             cam_view_proj = cam_view @ proj_matrix # [V, 4, 4]
             cam_pos = - cam_poses[:, :3, 3] # [V, 3]
 
-            image = model.gs.render(Gaussian.capture(), cam_view.unsqueeze(0), cam_view_proj.unsqueeze(0), cam_pos.unsqueeze(0), scale_modifier=1)['image']
+            image = model.gs.render(Gaussian.save_gaussians(), cam_view.unsqueeze(0), cam_view_proj.unsqueeze(0), cam_pos.unsqueeze(0), scale_modifier=1)['image']
             images.append((image.squeeze(1).permute(0,2,3,1).contiguous().float().cpu().numpy() * 255).astype(np.uint8))
 
         images = np.concatenate(images, axis=0)

@@ -77,20 +77,27 @@ class Options:
     # for stylize optimizer setting, something maybe not useful
     edit_train_steps: int = 1500 # set 200 for testing, acutally should be 1500
     spatial_lr_scale: float = 3.0
-    gs_lr_scaler: float = 3.0
-    position_lr_init = 0.00016 * gs_lr_scaler
-    gs_lr_end_scaler: float = 2.0
-    position_lr_final = 0.000016 * gs_lr_end_scaler
-    position_lr_delay_mult = 0.01
-    position_lr_max_steps = edit_train_steps
-    color_lr_scaler: float = 3.0
-    opacity_lr_scaler: float = 2.0
-    opacity_lr = 0.05 * opacity_lr_scaler
-    scaling_lr_scaler: float = 2.0
-    scaling_lr = 0.005 * scaling_lr_scaler
-    rotation_lr_scaler: float = 2.0
-    rotation_lr = 0.001 * rotation_lr_scaler
-    color_lr = 0.0125 * color_lr_scaler
+    # gs_lr_scaler: float = 3.0
+    # position_lr_init = 0.00016 * gs_lr_scaler
+    # gs_lr_end_scaler: float = 2.0
+    # position_lr_final = 0.000016 * gs_lr_end_scaler
+    # position_lr_delay_mult = 0.01
+    # position_lr_max_steps = edit_train_steps
+    # color_lr_scaler: float = 3.0
+    # opacity_lr_scaler: float = 2.0
+    # opacity_lr = 0.05 * opacity_lr_scaler
+    # scaling_lr_scaler: float = 2.0
+    # scaling_lr = 0.005 * scaling_lr_scaler
+    # rotation_lr_scaler: float = 2.0
+    # rotation_lr = 0.001 * rotation_lr_scaler
+    # color_lr = 0.0125 * color_lr_scaler
+
+    position_lr = 5e-4
+    opacity_lr = 5e-4
+    scaling_lr = 5e-4
+    rotation_lr = 5e-4
+    color_lr = 5e-4
+
     # for editing process setting
     per_editing_steps: int = 2 # 10 default
     # 目前来看per editing, editing stage没用，因为直接editing...
