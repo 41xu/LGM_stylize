@@ -207,7 +207,7 @@ class GaussianModel:
         rots = gaussians[..., 7:11].to("cuda")
         rgbs = gaussians[..., 11:].to("cuda")
 
-        self._xyz = nn.Parameter(xyz, requires_grad=True)
+        self._xyz = nn.Parameter(xyz, requires_grad=False)
         self._rgbs = nn.Parameter(rgbs, requires_grad=True)
         self._opacity = nn.Parameter(opacities, requires_grad=True)
         self._scaling = nn.Parameter(scales, requires_grad=True)

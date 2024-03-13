@@ -92,18 +92,20 @@ class Options:
     # rotation_lr = 0.001 * rotation_lr_scaler
     # color_lr = 0.0125 * color_lr_scaler
 
-    position_lr = 5e-4
-    opacity_lr = 5e-4
+    position_lr = 5e-5
+    opacity_lr = 5e-5
     scaling_lr = 5e-4
     rotation_lr = 5e-4
-    color_lr = 5e-4
+    # color_lr = 5e-4
+    color_lr = 5e-3
 
     # for editing process setting
     per_editing_steps: int = 2 # 10 default
     # 目前来看per editing, editing stage没用，因为直接editing...
     edit_begin_step: int = 0
     edit_util_step: int = 1500 # for testing, actually should be 1000
-    text_prompt: str = 'Make it steampunk style' # 'make it to the cartoon style'
+    # text_prompt: str = 'Make it steampunk style' # 'make it to the cartoon style'
+    text_prompt: str = 'Make it terrifying'
     # text_prompt: str = 'Turn him into a clown' # 'make it to the cartoon style'
     # for stylize optimizer
     edit_lambda_l1: float = 100 # 10-》100 效果好一点
