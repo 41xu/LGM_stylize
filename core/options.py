@@ -117,6 +117,8 @@ class Options:
 
     data_path: str = ''
 
+    style_path: str = "style_image.png"
+
 
 
 # all the default settings

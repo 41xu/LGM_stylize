@@ -30,6 +30,8 @@ from threestudio.models.guidance.instructpix2pix_guidance import InstructPix2Pix
 from threestudio.models.prompt_processors.stable_diffusion_prompt_processor import StableDiffusionPromptProcessor
 from threestudio.utils.perceptual import PerceptualLoss
 
+from nn_loss import match_colors_for_image_set, NNLoss
+
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
@@ -80,20 +82,6 @@ bg_remover = rembg.new_session()
 negative_prompt = 'ugly, blurry, pixelated obscure, unnatural colors, poor lighting, dull, unclear, cropped, lowres, low quality, artifacts, duplicate'
 
 
-def config_optimizers(opt):
-    optimizer_params = OptimizationParams(
-        parser = ArgumentParser(description="Stylize script parameters"),
-        max_steps = opt.edit_train_steps,
-        lr_scaler = opt.gs_lr_scaler,
-        lr_final_scaler = opt.gs_lr_end_scaler,
-        color_lr_scaler = opt.color_lr_scaler,
-        opacity_lr_scaler = opt.opacity_lr_scaler,
-        scaling_lr_scaler = opt.scaling_lr_scaler,
-        rotation_lr_scaler = opt.rotation_lr_scaler,
-    )
-    optimizer = OmegaConf.create(vars(optimizer_params))
-    return optimizer
-
 def get_expon_lr_func(
     lr_init, lr_final, lr_delay_steps=0, lr_delay_mult=1.0, max_steps=1000000
 ):
@@ -136,64 +124,6 @@ def setup_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
-def gaussians_training_setup(gaussians, opt):
-    """
-            
-        pos = self.pos_act(x[..., 0:3]) # [B, N, 3]
-        opacity = self.opacity_act(x[..., 3:4])
-        scale = self.scale_act(x[..., 4:7])
-        rotation = self.rot_act(x[..., 7:11])
-        rgbs = self.rgb_act(x[..., 11:])
-
-        gaussians = torch.cat([pos, opacity, scale, rotation, rgbs], dim=-1) # [B, N, 14]
-        
-    """
-    xyz = gaussians[..., :3].detach().clone().requires_grad_(True)
-    opacity = gaussians[..., 3:4].detach().clone().requires_grad_(True)
-    scale = gaussians[..., 4:7].detach().clone().requires_grad_(True)
-    rotation = gaussians[..., 7:11].detach().clone().requires_grad_(True)
-    rgbs = gaussians[..., 11:].detach().clone().requires_grad_(True)
-
-    gaus = [xyz, opacity, scale, rotation, rgbs]
-
-    l = [
-        {
-            "params": [xyz],
-            "lr": opt.position_lr_init * opt.spatial_lr_scale,
-            "name": "xyz",
-        },
-        {
-            "params": [opacity],
-            "lr": opt.opacity_lr,
-            "name": "opacity",
-        },
-        {
-            "params": [scale],
-            "lr": opt.scaling_lr,
-            "name": "scaling",
-        },
-        {
-            "params": [rotation],
-            "lr": opt.rotation_lr,
-            "name": "rotation",
-        },
-        {
-            "params": [rgbs],
-            "lr": opt.color_lr,
-            "name": "feature",
-        }
-    ]
-    params_list = l
-    optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
-
-    return params_list, optimizer, gaus
-
-
-def update_lr(optimizer, xyz_scheduler_args, steps):
-    for param_group in optimizer.param_groups:
-        if param_group['name'] == 'xyz':
-            lr = xyz_scheduler_args(steps)
-            param_group["lr"] = lr
 
 class Gaussians:
     def __init__(self, gaussians, device):
@@ -304,8 +234,6 @@ def process(opt: Options, path):
     # in this 360 case, initialize 60 views for training and 48 views for stylize
 
     total_views = np.arange(0, 360, 360//opt.train_cam_num, dtype=np.int32)
-    view_index = random.sample(range(0, opt.train_cam_num), min(opt.train_cam_num, opt.edit_cam_num))
-    edit_views = [total_views[i] for i in view_index]
     images = []
     # render some images for train and editing
     for azi in tqdm.tqdm(total_views):
@@ -314,72 +242,77 @@ def process(opt: Options, path):
         cam_view = torch.inverse(cam_poses).transpose(1, 2)
         cam_view_proj = cam_view @ proj_matrix
         cam_pos = - cam_poses[:, :3, 3]
-        image = model.gs.render(Gaussian.save_gaussians(), cam_view.unsqueeze(0), cam_view_proj.unsqueeze(0), cam_pos.unsqueeze(0), scale_modifier=1)['image']
-        images.append(image)
-    train_images = [images[i] for i in view_index] # use for editing
-    edit_images = {}
+        image = model.gs.render(Gaussian.save_gaussians(), cam_view.unsqueeze(0), cam_view_proj.unsqueeze(0), cam_pos.unsqueeze(0), scale_modifier=1)['image'].squeeze(0)
+        images.append(image) # image.shape: 1,3,512,512 [content_image]
+    images = torch.cat(images, dim=0) # N_img,3,512,512
+    N_img, C, H, W = images.shape
+    # resize style image such that its long side matches the long side of content image
+    style_img = imageio.imread(opt.style_path).astype(np.float32) / 255.0
+    style_h, style_w = style_img.shape[:2]
+    content_long_side = max(images[0].shape[1], images[0].shape[2])
+    if style_h > style_w:
+        style_img = cv2.resize(
+            style_img,
+            (int(content_long_side / style_h * style_w), content_long_side),
+            interpolation=cv2.INTER_AREA,
+        )
+    else:
+        style_img = cv2.resize(
+            style_img,
+            (content_long_side, int(content_long_side / style_w * style_h)),
+            interpolation=cv2.INTER_AREA,
+        )
+    style_img = cv2.resize(
+        style_img,
+        (style_img.shape[1] // 2, style_img.shape[0] //2),
+        interpolation=cv2.INTER_AREA,
+    ) # this is to replace the downsampling in optimization loop
 
-    prompt_utils = StableDiffusionPromptProcessor({
-        'pretrained_model_name_or_path': 'runwayml/stable-diffusion-v1-5',
-        'prompt': opt.text_prompt,
-        # 'use_cache': False,
-        'spawn': False,
-    })()
+    imageio.imwrite(
+        os.path.join(opt.workspace, "style_image.png"),
+        np.clip(style_img * 255.0, 0.0, 255.0).astype(np.uint8),
+    )
+    style_img = torch.from_numpy(style_img).to("cuda") # 160,256,3
 
-    # edit
-    ip2p = InstructPix2PixGuidance(OmegaConf.create({"min_step_percent": 0.02, "max_step_percent": 0.98}))
-    view_index_stack = list(range(len(edit_views)))
-    elevation = 0
-
+    # color transfer
+    content_images, color_tf = match_colors_for_image_set(images, style_img) # color_tf: [4,4]
+    dtype = images.dtype
+    for i in range(len(images)):
+        tmp = torch.cat((images[i].reshape(-1, 3), torch.ones((H*W, 1), dtype=dtype, device=device)), dim=-1)
+        tmp = tmp @ color_tf[:3,:4].T
+        images[i] = tmp.reshape(3, H, W)
+    
+    nn_loss_fn = NNLoss(device="cuda")
     for step in tqdm.tqdm(range(opt.edit_train_steps)):
-        # model.train()
-        if not view_index_stack:
-            view_index_stack = list(range(len(edit_views)))
-        
-        view_index = random.choice(view_index_stack)
-        view_index_stack.remove(view_index)
-        
-        cam_pos = torch.from_numpy(orbit_camera(elevation, edit_views[view_index], radius=opt.cam_radius, opengl=True)).unsqueeze(0).to(device)
+        view_stack = list(range(len(total_views)))
+        view_index = random.choice(view_stack)
+        gt_image = images[view_index].unsqueeze(0)
+
+        cam_pos = torch.from_numpy(orbit_camera(0, total_views[view_index], radius=opt.cam_radius, opengl=True)).unsqueeze(0).to(device)
         cam_pos[:, :3, 1:3] *= -1
         cam_view = torch.inverse(cam_pos).transpose(1, 2)
         cam_view_proj = cam_view @ proj_matrix
         cam_pos = - cam_pos[:, :3, 3]
 
-        render_image = model.gs.render(Gaussian.save_gaussians(), cam_view.unsqueeze(0), cam_view_proj.unsqueeze(0), cam_pos.unsqueeze(0), scale_modifier=1)['image']
-        # render_image shape and train_image shape: [1,1,3,512,512]
-        render_image_reshape = render_image.squeeze(0).permute(0, 2, 3, 1)
+        render_image = model.gs.render(Gaussian.save_gaussians(), cam_view.unsqueeze(0), cam_view_proj.unsqueeze(0), cam_pos.unsqueeze(0), scale_modifier=1)['image'].squeeze(0)
+        # 1,3,512,512
 
-        # loss calculate
-        if view_index not in edit_images or (opt.per_editing_steps > 0 and opt.edit_begin_step < step < opt.edit_util_step and step % opt.per_editing_steps == 0):
-            train_img = train_images[view_index].squeeze(0).permute(0, 2, 3, 1) # 1,H,W,C
-            result = ip2p(render_image_reshape, train_img, prompt_utils)
-            # render_image shape should be 1,512,512,3
-            edit_images[view_index] = result["edit_images"].detach().clone() # 1,H,W,C
-            # tmp = edit_images[view_index].squeeze(0) * 255
-            # tmp = tmp.clamp(0, 255).cpu().numpy().astype(np.uint8)
-            # # tmp2 = render_image_reshape.squeeze(0) * 255
-            # # tmp2 = tmp2.clamp(0, 255).cpu().detach().numpy().astype(np.uint8)
-            # image = Image.fromarray(tmp).save(f'{opt.workspace}/{name}_{step}.png')
-
-        # print(edit_images.keys(), len(edit_images.keys()))
-        gt_image = edit_images[view_index] 
-
-
-        loss = opt.edit_lambda_l1 * torch.nn.functional.l1_loss(render_image_reshape, gt_image) + \
-                opt.edit_lambda_p * perceptual_loss(render_image_reshape.permute(0, 3, 1, 2).contiguous(), gt_image.permute(0, 3, 1, 2).contiguous()) # perceptual input should be 1,C,H,W
-         # TODO: loss add model loss
-        
-        # mse loss for rendering
-        reconstruct = 100 * F.mse_loss(render_image.squeeze(0).permute(0, 2, 3, 1), gt_image)
-        print("loss.detach().item():", loss.detach().item(), "reconstruct:", reconstruct.detach().item())
-        loss += reconstruct
+        nn_loss, _, content_loss = nn_loss_fn(
+            F.interpolate(render_image, size=None, scale_factor=0.5, mode="bilinear"),
+            style_img.permute(2, 0, 1).unsqueeze(0),
+            loss_names=["nn_loss", "content_loss"],
+            contents=F.interpolate(gt_image, size=None, scale_factor=0.5, mode="bilinear"),
+        )
+        loss = nn_loss*10 + content_loss * 0.05
+        print(nn_loss, content_loss)
+        # reconstruct loss:
+        # reconstruct = F.mse_loss(render_image, gt_image)
+        # loss += reconstruct
+        # print(nn_loss, content_loss, reconstruct)
         loss.backward()
-
         Gaussian.optimizer.step()
         Gaussian.optimizer.zero_grad()
-        # densify_and_prune(step)
-        # optimizer.step()
-        # optimizer.zero_grad()
+
         
 
         print(f"[INFO] loss: {loss.detach().item():.6f}")
@@ -388,18 +321,15 @@ def process(opt: Options, path):
             if step % 10 == 0: # log
                 # fix front view for logging
                 vi = 0
-                cam_poses_vi = torch.from_numpy(orbit_camera(elevation, total_views[vi], radius=opt.cam_radius, opengl=True)).unsqueeze(0).to(device)
+                cam_poses_vi = torch.from_numpy(orbit_camera(0, total_views[vi], radius=opt.cam_radius, opengl=True)).unsqueeze(0).to(device)
                 cam_poses_vi[:, :3, 1:3] *= -1
                 cam_view_vi = torch.inverse(cam_poses_vi).transpose(1, 2)
                 cam_view_proj_vi = cam_view_vi @ proj_matrix
                 cam_pos_vi = - cam_poses_vi[:, :3, 3]
-                train_image_vi = images[vi].squeeze(0).permute(0, 2, 3, 1)
                 render_image_vi = model.gs.render(Gaussian.save_gaussians(), cam_view_vi.unsqueeze(0), cam_view_proj_vi.unsqueeze(0), cam_pos_vi.unsqueeze(0), scale_modifier=1)['image'].squeeze(0).permute(0, 2, 3, 1)
-                gt_image_vi = ip2p(render_image_vi, train_image_vi, prompt_utils)["edit_images"].detach().clone().squeeze(0) * 255
-                gt_image_vi = gt_image_vi.clamp(0, 255).cpu().numpy().astype(np.uint8)
                 render_image_vi = render_image_vi.squeeze(0) * 255
                 render_image_vi = render_image_vi.clamp(0, 255).cpu().detach().numpy().astype(np.uint8)
-                Image.fromarray(np.concatenate((gt_image_vi, render_image_vi), axis=1)).save(f'{opt.workspace}/{name}_{step}.png')
+                Image.fromarray(render_image_vi).save(f'{opt.workspace}/{name}_{step}.png')
 
             
     gaussians = Gaussian.save_gaussians()
@@ -413,7 +343,7 @@ def process(opt: Options, path):
         azimuth = np.arange(0, 360, 2, dtype=np.int32)
         for azi in tqdm.tqdm(azimuth):
                     
-            cam_poses = torch.from_numpy(orbit_camera(elevation, azi, radius=opt.cam_radius, opengl=True)).unsqueeze(0).to(device)
+            cam_poses = torch.from_numpy(orbit_camera(0, azi, radius=opt.cam_radius, opengl=True)).unsqueeze(0).to(device)
 
             cam_poses[:, :3, 1:3] *= -1 # invert up & forward direction
                     
