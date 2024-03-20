@@ -297,14 +297,32 @@ def process(opt: Options, path):
         render_image = model.gs.render(Gaussian.save_gaussians(), cam_view.unsqueeze(0), cam_view_proj.unsqueeze(0), cam_pos.unsqueeze(0), scale_modifier=1)['image'].squeeze(0)
         # 1,3,512,512
 
-        nn_loss, _, content_loss = nn_loss_fn(
+        # nn_loss, _, content_loss = nn_loss_fn(
+        #     F.interpolate(render_image, size=None, scale_factor=0.5, mode="bilinear"),
+        #     style_img.permute(2, 0, 1).unsqueeze(0),
+        #     loss_names=["nn_loss", "content_loss"],
+        #     contents=F.interpolate(gt_image, size=None, scale_factor=0.5, mode="bilinear"),
+        # )
+        # loss = nn_loss*10 + content_loss * 0.05
+        # print(nn_loss, content_loss)
+
+        # _, gram_loss, content_loss = nn_loss_fn(
+        #     F.interpolate(render_image, size=None, scale_factor=0.5, mode="bilinear"),
+        #     style_img.permute(2, 0, 1).unsqueeze(0),
+        #     loss_names=["gram_loss", "content_loss"],
+        #     contents=F.interpolate(gt_image, size=None, scale_factor=0.5, mode="bilinear"),
+        # )
+        # print(gram_loss, content_loss)
+        # loss = gram_loss * 5e-7 + content_loss * 0.5
+
+        nn_loss, gram_loss, content_loss = nn_loss_fn(
             F.interpolate(render_image, size=None, scale_factor=0.5, mode="bilinear"),
             style_img.permute(2, 0, 1).unsqueeze(0),
-            loss_names=["nn_loss", "content_loss"],
+            loss_names=["nn_loss", "gram_loss", "content_loss"],
             contents=F.interpolate(gt_image, size=None, scale_factor=0.5, mode="bilinear"),
         )
-        loss = nn_loss*10 + content_loss * 0.05
-        print(nn_loss, content_loss)
+        loss = nn_loss*10 + content_loss * 0.05 + gram_loss * 5e-9
+
         # reconstruct loss:
         # reconstruct = F.mse_loss(render_image, gt_image)
         # loss += reconstruct

@@ -94,10 +94,11 @@ class Options:
 
     position_lr = 5e-5
     opacity_lr = 5e-5
-    scaling_lr = 5e-4
-    rotation_lr = 5e-4
+    scaling_lr = 5e-5 # 5e-4
+    rotation_lr = 5e-5 # 5e-4
     # color_lr = 5e-4
     color_lr = 5e-3
+    # color_lr = 1e-3
 
     # for editing process setting
     per_editing_steps: int = 2 # 10 default
