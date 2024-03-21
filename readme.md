@@ -7,7 +7,11 @@
 python stylize_different_lr.py big --resume pretrained/model_fp16.safetensors --workspace stylize_result --test_path style_test/
 
 # image-based stylization
+python stylize_nnfm.py big --resume pretrained/model_fp16.safetensors --workspace stylize_result --test_path style_test/
 
+# some testing and helpful scripts
+# script for lora training using a small dataset of VanGogh's painting
+python train_lora.py config/VanGogh.json
 
 ```
 

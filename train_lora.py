@@ -27,6 +27,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
+from torchvision.utils import save_image
 import transformers
 from accelerate import Accelerator
 from accelerate.logging import get_logger
@@ -84,8 +85,9 @@ class TrainingConfig:
     max_grad_norm: float = 1.0
 
     # eval
-    eval_epochs: int = 10
+    eval_steps: int = 500
     eval_prompt: str = "A cat in the style of Van Gogh's painting"
+    eval_num_images: int = 4
 
     
 
@@ -399,33 +401,40 @@ def main():
                         )
 
                         logger.info(f"Saved state to {save_path}")
+                
+                if cfg.eval_prompt is not None and global_step % cfg.eval_steps == 0:
+                    if accelerator.is_main_process:
+                        logger.info(f"Running evaluation at epoch {epoch}")
+                        # create pipeline
+                        pipeline = StableDiffusionPipeline.from_pretrained(
+                            cfg.pretrained_model_name_or_path,
+                            unet=accelerator.unwrap_model(unet),
+                            torch_dtype=weight_dtype,
+                        )
+                        pipeline = pipeline.to(accelerator.device)
+                        pipeline.set_progress_bar_config(disable=True)
+
+                        # inference
+                        generator = torch.Generator(device=accelerator.device)
+                        if cfg.seed is not None:
+                            generator = generator.manual_seed(cfg.seed)
+                        images = []
+                        with torch.cuda.amp.autocast():
+                            for _ in range(cfg.eval_num_images):
+                                images.append(pipeline(cfg.eval_prompt, num_inference_steps=20, generator=generator).images[0])
+                        W, H = images[0].size
+
+                        combind_W = W * len(images)          
+                        combind_image = Image.new('RGB', (combind_W, H))
+                        for i in range(len(images)):
+                            combind_image.paste(images[i], (i*W, 0))
+                        combind_image.save(os.path.join(cfg.output_dir, f"eval_{global_step}.png"))
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
 
             if global_step >= max_train_steps:
                 break   
-        
-        if accelerator.is_main_process:
-            if cfg.eval_prompt is not None and epoch % cfg.eval_epochs == 0:
-                logger.info(f"Running evaluation at epoch {epoch}")
-                # create pipeline
-                pipeline = StableDiffusionPipeline.from_pretrained(
-                    cfg.pretrained_model_name_or_path,
-                    unet=accelerator.unwrap_model(unet),
-                    torch_dtype=weight_dtype,
-                )
-                pipeline = pipeline.to(accelerator.device)
-                pipeline.set_progress_bar_config(disable=True)
-
-                # inference
-                generator = torch.Generator(device=accelerator.device)
-                if cfg.seed is not None:
-                    generator = generator.manual_seed(cfg.seed)
-                images = []
-                # with torch.cuda.amp.autocast():
-                #     for _ in range(args,)
-
 
 
     # Save lora layers

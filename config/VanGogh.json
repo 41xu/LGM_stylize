@@ -22,5 +22,6 @@
     "noise_offset": 0.1,
     "max_grad_norm": 1.0,
     "eval_prompt": "A cat in the style of Van Gogh's painting",
-    "eval_epochs": 100
+    "eval_steps": 500,
+    "eval_num_images": 4
 }
