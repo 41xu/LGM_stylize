@@ -27,3 +27,5 @@ test_face/
 stylize_result_total_optimize/
 
 lora_ckpt
+tmp.png
+tmp_ip2p.png

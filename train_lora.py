@@ -22,6 +22,7 @@ import random
 import shutil
 from pathlib import Path
 
+import cv2
 import datasets
 import numpy as np
 import torch
@@ -45,7 +46,7 @@ from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
 import diffusers
-from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, StableDiffusionPipeline, UNet2DConditionModel
+from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, StableDiffusionPipeline, UNet2DConditionModel, ControlNetModel, StableDiffusionControlNetImg2ImgPipeline
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import compute_snr
 from diffusers.utils import check_min_version, convert_state_dict_to_diffusers, is_wandb_available
@@ -402,33 +403,34 @@ def main():
 
                         logger.info(f"Saved state to {save_path}")
                 
-                if cfg.eval_prompt is not None and global_step % cfg.eval_steps == 0:
-                    if accelerator.is_main_process:
-                        logger.info(f"Running evaluation at epoch {epoch}")
-                        # create pipeline
-                        pipeline = StableDiffusionPipeline.from_pretrained(
-                            cfg.pretrained_model_name_or_path,
-                            unet=accelerator.unwrap_model(unet),
-                            torch_dtype=weight_dtype,
-                        )
-                        pipeline = pipeline.to(accelerator.device)
-                        pipeline.set_progress_bar_config(disable=True)
+                # if cfg.eval_prompt is not None and global_step % cfg.eval_steps == 0:
+                #     if accelerator.is_main_process:
+                #         logger.info(f"Running evaluation at epoch {epoch}")
+                #         # create pipeline
+                #         pipeline = StableDiffusionPipeline.from_pretrained(
+                #             cfg.pretrained_model_name_or_path,
+                #             unet=accelerator.unwrap_model(unet),
+                #             torch_dtype=weight_dtype,
+                #         )
+                #         # pipeline.load_lora_weights(unet_lora_state_dict) # 这行code 写错了，直接重新验证把
+                #         pipeline = pipeline.to(accelerator.device)
+                #         pipeline.set_progress_bar_config(disable=True)
 
-                        # inference
-                        generator = torch.Generator(device=accelerator.device)
-                        if cfg.seed is not None:
-                            generator = generator.manual_seed(cfg.seed)
-                        images = []
-                        with torch.cuda.amp.autocast():
-                            for _ in range(cfg.eval_num_images):
-                                images.append(pipeline(cfg.eval_prompt, num_inference_steps=20, generator=generator).images[0])
-                        W, H = images[0].size
+                #         # inference
+                #         generator = torch.Generator(device=accelerator.device)
+                #         if cfg.seed is not None:
+                #             generator = generator.manual_seed(cfg.seed)
+                #         images = []
+                #         with torch.cuda.amp.autocast():
+                #             for _ in range(cfg.eval_num_images):
+                #                 images.append(pipeline(cfg.eval_prompt, num_inference_steps=20, generator=generator).images[0])
+                #         W, H = images[0].size
 
-                        combind_W = W * len(images)          
-                        combind_image = Image.new('RGB', (combind_W, H))
-                        for i in range(len(images)):
-                            combind_image.paste(images[i], (i*W, 0))
-                        combind_image.save(os.path.join(cfg.output_dir, f"eval_{global_step}.png"))
+                #         combind_W = W * len(images)          
+                #         combind_image = Image.new('RGB', (combind_W, H))
+                #         for i in range(len(images)):
+                #             combind_image.paste(images[i], (i*W, 0))
+                #         combind_image.save(os.path.join(cfg.output_dir, f"eval_{global_step}.png"))
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
@@ -467,6 +469,103 @@ def image_process(path):
             image = image.resize((h//4, w//4))
             image.save(os.path.join(out_path, filename))
 
+def inference(prompt):
+    pipeline = StableDiffusionPipeline.from_pretrained(
+        "runwayml/stable-diffusion-v1-5",
+        torch_dtype=torch.float32,
+    )
+    pipeline = pipeline.to("cuda")
+    # pipeline.load_lora_weights("lora_ckpt/checkpoint-2000/")
+    generator = torch.Generator(device="cuda")
+    
+    images = []
+    with torch.cuda.amp.autocast():
+        for _ in range(4):
+            images.append(pipeline(prompt, num_inference_steps=20, generator=generator).images[0])
+            W, H = images[0].size
+
+            combind_W = W * len(images)          
+            combind_image = Image.new('RGB', (combind_W, H))
+            for i in range(len(images)):
+                combind_image.paste(images[i], (i*W, 0))
+            combind_image.save(os.path.join("lora_ckpt", f"compare.png"))
+
+
+def style_transfer(ckpt_path="lora_ckpt/checkpoint-2000", img_path="cat/frame_000.png"):
+    controlnet_path = "lllyasviel/sd-controlnet-canny" # whether use controlnet, pending...
+    prompt = None
+    init_image = Image.open(img_path).convert("RGB")
+    init_image = init_image.resize((512, 512))
+    np_image = np.array(init_image)
+    set_seed(0)
+    # Canny image
+    np_image = cv2.Canny(np_image, 100, 200)
+    np_image = np_image[:, :, None]
+    np_image = np.concatenate([np_image, np_image, np_image], axis=2)
+    canny_image = Image.fromarray(np_image)
+    canny_image.save('lora_ckpt/tmp_edge.png')
+
+    prompt = "make it a Van Gogh's painting'"
+    negative_prompt = 'ugly, blurry, pixelated obscure, unnatural colors, poor lighting, dull, unclear, cropped, lowres, low quality, artifacts, duplicate'
+
+    generator = torch.Generator()
+    generator = generator.manual_seed(0)
+
+    controlnet = ControlNetModel.from_pretrained(controlnet_path)
+    pipeline = StableDiffusionControlNetImg2ImgPipeline.from_pretrained(
+        "runwayml/stable-diffusion-v1-5",
+        controlnet=controlnet,
+    )
+    pipeline.load_lora_weights(ckpt_path)
+    H, W = 512, 512       
+    combind_W = W * 4  
+    combind_image = Image.new('RGB', (combind_W, H))
+    for i in range(4):
+        out = pipeline(
+            prompt=prompt, 
+            negative_prompt=negative_prompt, 
+            strength=0.5,
+            guidance_scale=7.5,
+            controlnet_conditioning_scale=0.5,
+            num_inference_steps=20,
+            cross_attention_kwargs={"scale": 1.0},
+            image=init_image,
+            control_image=canny_image
+            ).images[0]
+
+  
+        combind_image.paste(out, (i*W, 0))
+    combind_image.save("tmp.png")
+
+
+def ip2p_edit(img_path="cat/frame_000.png"):
+    """
+    as a comparision method
+    """
+    from threestudio.models.guidance.instructpix2pix_guidance import InstructPix2PixGuidance
+    from threestudio.models.prompt_processors.stable_diffusion_prompt_processor import StableDiffusionPromptProcessor
+    set_seed(0)
+    prompt_utils = StableDiffusionPromptProcessor({
+        'pretrained_model_name_or_path': "runwayml/stable-diffusion-v1-5",
+        'prompt': "make it a Van Gogh's painting",
+        'spawn': False,
+    })()
+    generator = torch.Generator()
+    generator = generator.manual_seed(0)
+
+
+    ip2p = InstructPix2PixGuidance(OmegaConf.create({"min_step_percent": 0.02, "max_step_percent": 0.98}))
+    init_image = Image.open(img_path).convert("RGB")
+    init_image = init_image.resize((512, 512))
+    init_image = transforms.ToTensor()(init_image).unsqueeze(0).permute(0, 2, 3, 1).to("cuda")
+    cond = init_image.clone()
+    result = (ip2p(init_image, cond, prompt_utils)["edit_images"].squeeze().contiguous().float().cpu().numpy() * 255).astype(np.uint8)
+    print(result.shape)
+    Image.fromarray(result).save('tmp_ip2p.png')
+
 if __name__ == '__main__':
     # image_process("/home/shiyaoxu/datasets/VanGogh/train")
-    main()
+    # main()
+    # ip2p_edit()
+    style_transfer()
+    # inference("A cat in the style of Van Gogh's painting")

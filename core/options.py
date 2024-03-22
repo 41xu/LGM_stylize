@@ -101,12 +101,13 @@ class Options:
     # color_lr = 1e-3
 
     # for editing process setting
-    per_editing_steps: int = 2 # 10 default
+    per_editing_steps: int = 10 # 10 default
     # 目前来看per editing, editing stage没用，因为直接editing...
     edit_begin_step: int = 0
     edit_util_step: int = 1500 # for testing, actually should be 1000
     # text_prompt: str = 'Make it steampunk style' # 'make it to the cartoon style'
-    text_prompt: str = 'Make it terrifying'
+    # text_prompt: str = 'Make it terrifying'
+    text_prompt: str = "make it a Van Gogh's painting"
     # text_prompt: str = 'Turn him into a clown' # 'make it to the cartoon style'
     # for stylize optimizer
     edit_lambda_l1: float = 100 # 10-》100 效果好一点
@@ -119,6 +120,10 @@ class Options:
     data_path: str = ''
 
     style_path: str = "style_image.png"
+
+    lora_path: str = "lora_ckpt/checkpoint-2000"
+    controlnet_path: str = "lllyasviel/sd-controlnet-canny"
+    sd_path: str = "runwayml/stable-diffusion-v1-5"
 
 
 
