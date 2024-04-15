@@ -403,34 +403,34 @@ def main():
 
                         logger.info(f"Saved state to {save_path}")
                 
-                # if cfg.eval_prompt is not None and global_step % cfg.eval_steps == 0:
-                #     if accelerator.is_main_process:
-                #         logger.info(f"Running evaluation at epoch {epoch}")
-                #         # create pipeline
-                #         pipeline = StableDiffusionPipeline.from_pretrained(
-                #             cfg.pretrained_model_name_or_path,
-                #             unet=accelerator.unwrap_model(unet),
-                #             torch_dtype=weight_dtype,
-                #         )
-                #         # pipeline.load_lora_weights(unet_lora_state_dict) # 这行code 写错了，直接重新验证把
-                #         pipeline = pipeline.to(accelerator.device)
-                #         pipeline.set_progress_bar_config(disable=True)
+                if cfg.eval_prompt is not None and global_step % cfg.eval_steps == 0:
+                    if accelerator.is_main_process:
+                        logger.info(f"Running evaluation at epoch {epoch}")
+                        # create pipeline
+                        pipeline = StableDiffusionPipeline.from_pretrained(
+                            cfg.pretrained_model_name_or_path,
+                            unet=accelerator.unwrap_model(unet),
+                            torch_dtype=weight_dtype,
+                        )
+                        # pipeline.load_lora_weights(unet_lora_state_dict) # 这行code 写错了，直接重新验证把
+                        pipeline = pipeline.to(accelerator.device)
+                        pipeline.set_progress_bar_config(disable=True)
 
-                #         # inference
-                #         generator = torch.Generator(device=accelerator.device)
-                #         if cfg.seed is not None:
-                #             generator = generator.manual_seed(cfg.seed)
-                #         images = []
-                #         with torch.cuda.amp.autocast():
-                #             for _ in range(cfg.eval_num_images):
-                #                 images.append(pipeline(cfg.eval_prompt, num_inference_steps=20, generator=generator).images[0])
-                #         W, H = images[0].size
+                        # inference
+                        generator = torch.Generator(device=accelerator.device)
+                        if cfg.seed is not None:
+                            generator = generator.manual_seed(cfg.seed)
+                        images = []
+                        with torch.cuda.amp.autocast():
+                            for _ in range(cfg.eval_num_images):
+                                images.append(pipeline(cfg.eval_prompt, num_inference_steps=20, generator=generator).images[0])
+                        W, H = images[0].size
 
-                #         combind_W = W * len(images)          
-                #         combind_image = Image.new('RGB', (combind_W, H))
-                #         for i in range(len(images)):
-                #             combind_image.paste(images[i], (i*W, 0))
-                #         combind_image.save(os.path.join(cfg.output_dir, f"eval_{global_step}.png"))
+                        combind_W = W * len(images)          
+                        combind_image = Image.new('RGB', (combind_W, H))
+                        for i in range(len(images)):
+                            combind_image.paste(images[i], (i*W, 0))
+                        combind_image.save(os.path.join(cfg.output_dir, f"eval_{global_step}.png"))
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
@@ -535,7 +535,30 @@ def style_transfer(ckpt_path="lora_ckpt/checkpoint-2000", img_path="cat/frame_00
 
   
         combind_image.paste(out, (i*W, 0))
-    combind_image.save("tmp.png")
+
+    # # use stable diffusion for testing
+    # print("load pipeline")
+    # pipeline = StableDiffusionPipeline.from_pretrained(
+    #     "runwayml/stable-diffusion-v1-5",
+    # )
+    # pipeline.load_lora_weights(ckpt_path)
+    # print("load lora done")
+    # H, W = 512, 512
+    # combind_W = W * 4
+    # combind_image = Image.new('RGB', (combind_W, H))
+    # for i in range(4):
+    #     print("each inference")
+    #     out = pipeline(
+    #         prompt=prompt,
+    #         negative_prompt=negative_prompt,
+    #         strength=0.5,
+    #         guidance_scale=7.5,
+    #         num_inference_steps=20,
+    #         cross_attention_kwargs={"scale": 1.0},
+    #         image=init_image,
+    #         ).images[0]
+    #     combind_image.paste(out, (i*W, 0))
+    # combind_image.save("tmp.png")
 
 
 def ip2p_edit(img_path="cat/frame_000.png"):
@@ -565,7 +588,7 @@ def ip2p_edit(img_path="cat/frame_000.png"):
 
 if __name__ == '__main__':
     # image_process("/home/shiyaoxu/datasets/VanGogh/train")
-    # main()
+    main()
     # ip2p_edit()
-    style_transfer()
+    # style_transfer()
     # inference("A cat in the style of Van Gogh's painting")

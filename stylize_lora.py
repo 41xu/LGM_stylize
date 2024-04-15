@@ -30,7 +30,7 @@ from stylize_utils import OptimizationParams
 from omegaconf import OmegaConf
 from threestudio.utils.perceptual import PerceptualLoss
 
-from diffusers import ControlNetModel, StableDiffusionControlNetImg2ImgPipeline
+from diffusers import ControlNetModel, StableDiffusionControlNetImg2ImgPipeline, StableDiffusionPipeline
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
@@ -321,6 +321,7 @@ def process(opt: Options, path):
 
     controlnet = ControlNetModel.from_pretrained(opt.controlnet_path)
     pipeline = StableDiffusionControlNetImg2ImgPipeline.from_pretrained(opt.sd_path, controlnet=controlnet)
+    # pipeline = StableDiffusionPipeline.from_pretrained(opt.sd_path)
     pipeline.load_lora_weights(opt.lora_path)
 
     # edit
@@ -368,6 +369,15 @@ def process(opt: Options, path):
                 cross_attention_kwargs={"scale": 1.0},
                 image=render_img_pil,
                 control_image=render_img_canny).images[0]
+            # result = pipeline(
+            #     prompt = opt.text_prompt,
+            #     negative_prompt = negative_prompt,
+            #     strength = 0.5,
+            #     guidance_scale = 7.5,
+            #     num_inference_steps=20,
+            #     cross_attention_kwargs={"scale": 1.0},
+            #     image=render_img_pil
+            # ).images[0]
             result = to_tensor(result) # CHW
             result = result.unsqueeze(0).to(device) # 1,C,H,W
             # render_image shape should be 1,512,512,3
@@ -396,7 +406,7 @@ def process(opt: Options, path):
         print(f"[INFO] loss: {loss.detach().item():.6f}")
 
         with torch.no_grad():
-            if step % 100 == 0: # log
+            if step % 10 == 0: # log
                 # fix front view for logging
                 vi = 0
                 cam_poses_vi = torch.from_numpy(orbit_camera(elevation, total_views[vi], radius=opt.cam_radius, opengl=True)).unsqueeze(0).to(device)

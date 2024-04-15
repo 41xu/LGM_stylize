@@ -76,6 +76,7 @@ class Options:
     edit_cam_num: int = 48 # 60
     # for stylize optimizer setting, something maybe not useful
     edit_train_steps: int = 1500 # set 200 for testing, acutally should be 1500
+    # use 500 for testing, default should be 1500
     spatial_lr_scale: float = 3.0
     # gs_lr_scaler: float = 3.0
     # position_lr_init = 0.00016 * gs_lr_scaler
