@@ -286,7 +286,7 @@ def process(opt: Options, path):
     # model.train()
 
     Gaussian = GaussianModel()
-
+    print("[INFO] Initialize LGM, generate previous 3DGS .ply")
     with torch.autocast(device_type='cuda', dtype=torch.float16):
         gaussians = model.forward_gaussians(input_image) # tensor, no gradient
 
@@ -480,5 +480,5 @@ for path in file_paths:
     process(opt, path)
 
 """
-python stylize.py big --resume pretrained/model_fp16.safetensors --workspace stylize_result --test_path style_test/
+python stylize_lora.py big --resume pretrained/model_fp16.safetensors --workspace stylize_result --test_path style_test/
 """

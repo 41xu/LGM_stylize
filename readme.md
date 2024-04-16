@@ -18,18 +18,24 @@ python train_lora.py config/VanGogh.json
 ### Install
 
 ```bash
+
+conda create -n LGM python=3.8
+conda activate LGM
+
+pip install -U xformers --index-url https://download.pytorch.org/whl/cu121
+conda install pytorch==2.1.1 torchvision==0.16.1 torchaudio==2.1.1 pytorch-cuda=12.1 -c pytorch -c nvidia
 # xformers is required! please refer to https://github.com/facebookresearch/xformers for details.
-# for example, we use torch 2.1.0 + cuda 18.1
-pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cu118
-pip install -U xformers --index-url https://download.pytorch.org/whl/cu118
 
 # a modified gaussian splatting (+ depth, alpha rendering)
-git clone --recursive https://github.com/ashawkey/diff-gaussian-rasterization
+# git clone --recursive https://github.com/ashawkey/diff-gaussian-rasterization
 pip install ./diff-gaussian-rasterization
 
 # for mesh extraction
 pip install git+https://github.com/NVlabs/nvdiffrast
 
+pip install git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
+
+pip install -r requirement_threestudio.txt
 # other dependencies
 pip install -r requirements.txt
 ```
