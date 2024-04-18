@@ -16,6 +16,7 @@ from safetensors.torch import load_file
 import rembg
 import random
 import cv2
+import time
 from PIL import Image
 
 import kiui
@@ -359,6 +360,8 @@ def process(opt: Options, path):
 
         # loss calculate
         if view_index not in edit_images or (opt.per_editing_steps > 0 and opt.edit_begin_step < step < opt.edit_util_step and step % opt.per_editing_steps == 0):
+            t0 = time.time()   
+            print("editing start: ", t0)
             result = pipeline(
                 prompt=opt.text_prompt, 
                 negative_prompt=negative_prompt, 
@@ -369,19 +372,12 @@ def process(opt: Options, path):
                 cross_attention_kwargs={"scale": 1.0},
                 image=render_img_pil,
                 control_image=render_img_canny).images[0]
-            # result = pipeline(
-            #     prompt = opt.text_prompt,
-            #     negative_prompt = negative_prompt,
-            #     strength = 0.5,
-            #     guidance_scale = 7.5,
-            #     num_inference_steps=20,
-            #     cross_attention_kwargs={"scale": 1.0},
-            #     image=render_img_pil
-            # ).images[0]
+      
             result = to_tensor(result) # CHW
             result = result.unsqueeze(0).to(device) # 1,C,H,W
             # render_image shape should be 1,512,512,3
             edit_images[view_index] = result.permute(0, 2, 3, 1)
+            print("End editing. ", time.time() - t0)
 
         # print(edit_images.keys(), len(edit_images.keys()))
         gt_image = edit_images[view_index] 
@@ -406,7 +402,7 @@ def process(opt: Options, path):
         print(f"[INFO] loss: {loss.detach().item():.6f}")
 
         with torch.no_grad():
-            if step % 10 == 0: # log
+            if step % 100 == 0: # log
                 # fix front view for logging
                 vi = 0
                 cam_poses_vi = torch.from_numpy(orbit_camera(elevation, total_views[vi], radius=opt.cam_radius, opengl=True)).unsqueeze(0).to(device)
