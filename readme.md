@@ -4,14 +4,43 @@
 
 ```bash
 # use ip2p for stylization and editing
+1. ip2p编辑，更新全部gaussian attribute
+
+python stylize.py big --resume pretrained/model_fp16.safetensors --workspace stylize_result --test_path style_test/
+
+2. ip2p编辑，不同learning rate更新gaussian attribute
+
 python stylize_different_lr.py big --resume pretrained/model_fp16.safetensors --workspace stylize_result --test_path style_test/
 
-# image-based stylization
+3. 只用front-view做编辑，ip2p编辑，更新全部gaussian attribute
+
+python stylize_use_front.py big --resume pretrained/model_fp16.safetensors --workspace stylize_result_front --test_path style_test
+
+4. fix 8 views做编辑，ip2p编辑，更新全部gaussian attribute
+
+python stylize_use_front.py big --resume pretrained/model_fp16.safetensors --workspace stylize_result_front --test_path style_test
+
+5. random select N(60) views 更新全部gaussian attribute
+
+python stylize_multiview.py big --resume pretrained/model_fp16.safetensors --workspace stylize_result --test_path style_test/
+
+# 3,4,5 failed experiments.
+
+6. 使用image-based style transfer loss: GRAM_style, GRAM_content, NNFM_style_loss 更新gaussian_attribute, 基于differen_lr
+
 python stylize_nnfm.py big --resume pretrained/model_fp16.safetensors --workspace stylize_result --test_path style_test/
 
-# some testing and helpful scripts
+7. 使用lora进行编辑, different_lr:
+
 # script for lora training using a small dataset of VanGogh's painting
 python train_lora.py config/VanGogh.json
+# first train a lora, then use the lora to stylize the image.
+# step by step, graduate stylize the 3DGS
+python stylize_lora.py big --resume pretrained/model_fp16.safetensors --workspace stylize_result --test_path style_test/
+
+8. 使用lora进行编辑，尝试优化，尝试将StableDiffusionControlNetImg2Img写入threestudio/models/guidance/stablediffusion_controlnet_guidance.py 中, tbc
+
+python stylize_lora_guidance.py big --resume pretrained/model_fp16.safetensors --workspace stylize_result --test_path style_test/
 
 ```
 
